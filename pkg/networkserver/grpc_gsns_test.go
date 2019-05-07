@@ -2232,7 +2232,7 @@ func handleJoinTest() func(t *testing.T) {
 					t.Fatal("Join-request not sent to JS")
 
 				case <-time.After(Timeout):
-					t.Fatal("Timed out while waiting for join to be sent to JS")
+					t.Fatal("Timed out while waiting for join-request to be sent to JS")
 				}
 
 				md := sendUplinkDuplicates(t, ns, deduplicationDoneCh, ctx, tc.UplinkMessage, DuplicateCount)
@@ -2310,7 +2310,7 @@ func handleJoinTest() func(t *testing.T) {
 					})
 
 				case <-time.After(Timeout):
-					t.Fatal("Timed out while waiting for join to be sent to AS")
+					t.Fatal("Timed out while waiting for join-request to be sent to AS")
 				}
 
 				select {
@@ -2371,7 +2371,7 @@ func handleJoinTest() func(t *testing.T) {
 						t.Fatal("Join not sent to JS")
 
 					case <-time.After(Timeout):
-						t.Fatal("Timed out while waiting for join to be sent to JS")
+						t.Fatal("Timed out while waiting for join-request to be sent to JS")
 					}
 
 					_ = sendUplinkDuplicates(t, ns, deduplicationDoneCh, ctx, tc.UplinkMessage, DuplicateCount)
@@ -2402,7 +2402,7 @@ func handleJoinTest() func(t *testing.T) {
 						})
 
 					case <-time.After(Timeout):
-						t.Fatal("Timed out while waiting for join to be sent to AS")
+						t.Fatal("Timed out while waiting for join-request to be sent to AS")
 					}
 
 					pb.EndDeviceIdentifiers.DevAddr = &expectedRequest.DevAddr
