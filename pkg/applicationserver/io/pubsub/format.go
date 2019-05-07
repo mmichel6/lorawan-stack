@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mqtt
+package pubsub
 
 import (
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/formatters"
-	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/mqtt/topics"
+	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub/topics"
 )
 
 // Format represents a topic layout and message formatter.
 type Format interface {
+	topics.Layout
+	formatters.Formatter
+}
+
+type format struct {
 	topics.Layout
 	formatters.Formatter
 }

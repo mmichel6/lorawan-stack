@@ -28,6 +28,7 @@ import (
 	"github.com/TheThingsIndustries/mystique/pkg/session"
 	"github.com/TheThingsIndustries/mystique/pkg/topic"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io"
+	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub"
 	"go.thethings.network/lorawan-stack/pkg/auth/rights"
 	"go.thethings.network/lorawan-stack/pkg/errors"
 	"go.thethings.network/lorawan-stack/pkg/log"
@@ -42,12 +43,12 @@ const qosUpstream byte = 0
 type srv struct {
 	ctx    context.Context
 	server io.Server
-	format Format
+	format pubsub.Format
 	lis    mqttnet.Listener
 }
 
 // Start starts the MQTT frontend.
-func Start(ctx context.Context, server io.Server, listener net.Listener, format Format, protocol string) {
+func Start(ctx context.Context, server io.Server, listener net.Listener, format pubsub.Format, protocol string) {
 	ctx = log.NewContextWithField(ctx, "namespace", "applicationserver/io/mqtt")
 	ctx = mqttlog.NewContext(ctx, mqtt.Logger(log.FromContext(ctx)))
 	s := &srv{ctx, server, format, mqttnet.NewListener(listener, protocol)}
@@ -81,7 +82,7 @@ func (s *srv) accept() {
 }
 
 type connection struct {
-	format  Format
+	format  pubsub.Format
 	server  io.Server
 	mqtt    mqttnet.Conn
 	session session.Session

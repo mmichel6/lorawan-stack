@@ -12,22 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mqtt
+package pubsub
 
 import (
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/formatters"
-	mqtt "go.thethings.network/lorawan-stack/pkg/applicationserver/io/mqtt/topics"
-	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub/topics"
 )
 
-type json struct {
-	topics.Layout
-	formatters.Formatter
-}
-
 // JSON is a format that uses the default topic layout and JSON formatter.
-var JSON pubsub.Format = &json{
-	Layout:    mqtt.Default,
+var JSON Format = &format{
+	Layout:    topics.Default,
 	Formatter: formatters.JSON,
 }

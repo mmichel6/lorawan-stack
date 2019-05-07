@@ -14,7 +14,7 @@
 
 package topics
 
-// Layout represents an MQTT topic layout.
+// Layout represents an generic topic layout.
 type Layout interface {
 	AcceptedTopic(applicationUID string, requested []string) (accepted []string, ok bool)
 

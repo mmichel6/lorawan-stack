@@ -28,6 +28,7 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io"
 	iogrpc "go.thethings.network/lorawan-stack/pkg/applicationserver/io/grpc"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/mqtt"
+	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/web"
 	"go.thethings.network/lorawan-stack/pkg/auth/rights"
 	"go.thethings.network/lorawan-stack/pkg/component"
@@ -117,7 +118,7 @@ func New(c *component.Component, conf *Config) (as *ApplicationServer, err error
 	}()
 
 	for _, version := range []struct {
-		Format mqtt.Format
+		Format pubsub.Format
 		Config MQTTConfig
 	}{
 		{

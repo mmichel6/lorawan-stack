@@ -16,11 +16,14 @@ package topics
 
 import (
 	"github.com/TheThingsIndustries/mystique/pkg/topic"
+	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub/topics"
 )
 
 const topicV3 = "v3"
 
-type v3 struct{}
+type v3 struct {
+	topics.V3
+}
 
 func (v3) AcceptedTopic(applicationUID string, requested []string) ([]string, bool) {
 	// Rewrite # to v3/uid/#
@@ -44,61 +47,5 @@ func (v3) AcceptedTopic(applicationUID string, requested []string) ([]string, bo
 	return nil, false
 }
 
-func (v3) UplinkTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "up"}
-}
-
-func (v3) JoinAcceptTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "join"}
-}
-
-func (v3) DownlinkAckTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "ack"}
-}
-
-func (v3) DownlinkNackTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "nack"}
-}
-
-func (v3) DownlinkSentTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "sent"}
-}
-
-func (v3) DownlinkFailedTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "failed"}
-}
-
-func (v3) DownlinkQueuedTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "queued"}
-}
-
-func (v3) LocationSolvedTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "location", "solved"}
-}
-
-func (v3) DownlinkPushTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "push"}
-}
-
-func (v3) IsDownlinkPushTopic(parts []string) bool {
-	return len(parts) == 6 && parts[0] == topicV3 && parts[2] == "devices" && parts[4] == "down" && parts[5] == "push"
-}
-
-func (v3) ParseDownlinkPushTopic(parts []string) (deviceID string) {
-	return parts[3]
-}
-
-func (v3) DownlinkReplaceTopic(applicationUID, deviceID string) []string {
-	return []string{topicV3, applicationUID, "devices", deviceID, "down", "replace"}
-}
-
-func (v3) IsDownlinkReplaceTopic(parts []string) bool {
-	return len(parts) == 6 && parts[0] == topicV3 && parts[2] == "devices" && parts[4] == "down" && parts[5] == "replace"
-}
-
-func (v3) ParseDownlinkReplaceTopic(parts []string) (deviceID string) {
-	return parts[3]
-}
-
 // Default is the default topic layout.
-var Default Layout = &v3{}
+var Default topics.Layout = &v3{}
