@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -169,7 +170,6 @@ func (s *srv) handleTraffic(c echo.Context) error {
 		logger.WithError(err).Debug("Failed to fill gateway context")
 		return err
 	}
-
 	uid = unique.ID(ctx, ids)
 	ctx = log.NewContextWithField(ctx, "gateway_uid", uid)
 
@@ -216,7 +216,8 @@ func (s *srv) handleTraffic(c echo.Context) error {
 				return
 			case down := <-conn.Down():
 				dnmsg := messages.DownlinkMessage{}
-				dnmsg.FromDownlinkMessage(ids, *down, int64(s.tokens.Next(down.CorrelationIDs, time.Now())))
+				dlTime := time.Now()
+				dnmsg.FromDownlinkMessage(ids, *down, int64(s.tokens.Next(down.CorrelationIDs, dlTime)), dlTime)
 				msg, err := dnmsg.MarshalJSON()
 				if err != nil {
 					logger.WithError(err).Error("Failed to marshal downlink message")
@@ -312,7 +313,13 @@ func (s *srv) handleTraffic(c echo.Context) error {
 				logger.WithError(err).Warn("Failed to unmarshal Tx acknowledgement frame")
 				return nil
 			}
-			if correlationIDs, _, ok := s.tokens.Get(uint16(txConf.Diid), receivedAt); ok {
+			var refTime time.Time
+			sec, nsec := math.Modf(txConf.RefTime)
+			if sec != 0 {
+				refTime = time.Unix(int64(sec), int64(nsec*(1e9)))
+			}
+			if correlationIDs, timeDiff, ok := s.tokens.Get(uint16(txConf.Diid), refTime); ok {
+				conn.RecordRTT(timeDiff)
 				txAck := messages.ToTxAcknowledgment(correlationIDs)
 				if err := conn.HandleTxAck(&txAck); err != nil {
 					logger.Warn("Failed to handle Tx acknowledgement message")

@@ -17,6 +17,7 @@ package mock
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -28,11 +29,13 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/ttnpb"
 	"go.thethings.network/lorawan-stack/pkg/unique"
 	"go.thethings.network/lorawan-stack/pkg/util/test"
+	"google.golang.org/grpc/metadata"
 )
 
 type server struct {
 	store          *frequencyplans.Store
 	gateways       map[string]*ttnpb.Gateway
+	gatewayAuths   map[string][]string
 	connections    map[string]*io.Connection
 	connectionsCh  chan *io.Connection
 	downlinkClaims sync.Map
@@ -43,7 +46,7 @@ type Server interface {
 	io.Server
 
 	HasDownlinkClaim(context.Context, ttnpb.GatewayIdentifiers) bool
-	RegisterGateway(ctx context.Context, ids ttnpb.GatewayIdentifiers, gateway *ttnpb.Gateway)
+	RegisterGateway(ctx context.Context, ids ttnpb.GatewayIdentifiers, gateway *ttnpb.Gateway, authToken string)
 	GetConnection(ctx context.Context, ids ttnpb.GatewayIdentifiers) *io.Connection
 	Connections() <-chan *io.Connection
 }
@@ -53,6 +56,7 @@ func NewServer() Server {
 	return &server{
 		store:         frequencyplans.NewStore(test.FrequencyPlansFetcher),
 		gateways:      make(map[string]*ttnpb.Gateway),
+		gatewayAuths:  make(map[string][]string),
 		connections:   make(map[string]*io.Connection),
 		connectionsCh: make(chan *io.Connection, 10),
 	}
@@ -63,10 +67,26 @@ func (s *server) FillGatewayContext(ctx context.Context, ids ttnpb.GatewayIdenti
 	if ids.IsZero() {
 		return nil, ttnpb.GatewayIdentifiers{}, errors.New("the identifiers are zero")
 	}
-	if ids.GatewayID != "" {
+	if ids.GatewayID == "" {
+		ids.GatewayID = fmt.Sprintf("eui-%v", strings.ToLower(ids.EUI.String()))
 		return ctx, ids, nil
 	}
-	ids.GatewayID = fmt.Sprintf("eui-%v", strings.ToLower(ids.EUI.String()))
+
+	if _, ok := s.gateways[unique.ID(ctx, ids)]; !ok {
+		return nil, ttnpb.GatewayIdentifiers{}, errors.New("the gateway is not registered")
+	}
+
+	// Get the Auth token from context
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		authorization, ok := md["authorization"]
+		if ok && len(authorization) != 0 {
+			auth, ok := s.gatewayAuths[unique.ID(ctx, ids)]
+			if !ok || !reflect.DeepEqual(auth, authorization) {
+				return nil, ttnpb.GatewayIdentifiers{}, errors.New("the auth token is invalid")
+			}
+		}
+	}
 	return ctx, ids, nil
 }
 
@@ -127,8 +147,12 @@ func (s *server) HasDownlinkClaim(ctx context.Context, ids ttnpb.GatewayIdentifi
 	return ok
 }
 
-func (s *server) RegisterGateway(ctx context.Context, ids ttnpb.GatewayIdentifiers, gateway *ttnpb.Gateway) {
-	s.gateways[unique.ID(ctx, ids)] = gateway
+func (s *server) RegisterGateway(ctx context.Context, ids ttnpb.GatewayIdentifiers, gateway *ttnpb.Gateway, authToken string) {
+	uid := unique.ID(ctx, ids)
+	if authToken != "" {
+		s.gatewayAuths[uid] = []string{fmt.Sprintf("Bearer %v", authToken)}
+	}
+	s.gateways[uid] = gateway
 }
 
 func (s *server) GetConnection(ctx context.Context, ids ttnpb.GatewayIdentifiers) *io.Connection {

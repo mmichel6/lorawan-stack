@@ -39,10 +39,10 @@ import (
 )
 
 var (
-	registeredGatewayUID = "0101010101010101"
-	registeredGatewayID  = ttnpb.GatewayIdentifiers{GatewayID: "eui-" + registeredGatewayUID}
-	registeredGateway    = ttnpb.Gateway{GatewayIdentifiers: registeredGatewayID, FrequencyPlanID: "EU_863_870"}
-	registeredGatewayKey = "test-key"
+	registeredGatewayUID   = "0101010101010101"
+	registeredGatewayID    = ttnpb.GatewayIdentifiers{GatewayID: "eui-" + registeredGatewayUID}
+	registeredGateway      = ttnpb.Gateway{GatewayIdentifiers: registeredGatewayID, FrequencyPlanID: "EU_863_870"}
+	registeredGatewayToken = "secrettoken"
 
 	discoveryEndPoint      = "ws://localhost:8100/api/v3/gs/io/basicstation/discover"
 	connectionRootEndPoint = "ws://localhost:8100/api/v3/gs/io/basicstation/traffic/"
@@ -55,13 +55,79 @@ var (
 func eui64Ptr(eui types.EUI64) *types.EUI64 { return &eui }
 
 func TestAuthentication(t *testing.T) {
-	// TODO: Test authentication. We're gonna provision authentication tokens, which may be API keys.
-	// https://github.com/TheThingsNetwork/lorawan-stack/issues/558
+	ctx := log.NewContext(test.Context(), test.GetLogger(t))
+
+	c := component.MustNew(test.GetLogger(t), &component.Config{
+		ServiceBase: config.ServiceBase{
+			HTTP: config.HTTP{
+				Listen: ":8100",
+			},
+		},
+	})
+	gs := mock.NewServer()
+	srv := New(ctx, gs)
+	c.RegisterWeb(srv)
+	test.Must(nil, c.Start())
+	defer c.Close()
+
+	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway, registeredGatewayToken)
+
+	for _, tc := range []struct {
+		Name           string
+		GatewayID      string
+		AuthToken      string
+		ErrorAssertion func(err error) bool
+	}{
+		{
+			Name:           "RegisteredGatewayAndValidKey",
+			GatewayID:      registeredGatewayID.GatewayID,
+			AuthToken:      registeredGatewayToken,
+			ErrorAssertion: nil,
+		},
+		{
+			Name:      "RegisteredGatewayAndInValidKey",
+			GatewayID: registeredGatewayID.GatewayID,
+			AuthToken: "invalidToken",
+			ErrorAssertion: func(err error) bool {
+				return err == websocket.ErrBadHandshake
+			},
+		},
+		{
+			Name:           "RegisteredGatewayAndNoKey",
+			GatewayID:      registeredGatewayID.GatewayID,
+			ErrorAssertion: nil,
+		},
+		{
+			Name:      "UnregisteredGateway",
+			GatewayID: "eui-1122334455667788",
+			AuthToken: registeredGatewayToken,
+			ErrorAssertion: func(err error) bool {
+				return err == websocket.ErrBadHandshake
+			},
+		},
+	} {
+		t.Run(fmt.Sprintf("%s", tc.Name), func(t *testing.T) {
+			a := assertions.New(t)
+			h := http.Header{}
+			h.Set("Authorization", tc.AuthToken)
+			conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8100/api/v3/gs/io/basicstation/traffic/"+tc.GatewayID, h)
+			if err != nil {
+				if tc.ErrorAssertion == nil || !a.So(tc.ErrorAssertion(err), should.BeTrue) {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+			} else if tc.ErrorAssertion != nil {
+				t.Fatalf("Expected error")
+			}
+			if conn != nil {
+				conn.Close()
+			}
+		})
+	}
+
 }
 
 func TestDiscover(t *testing.T) {
 	ctx := log.NewContext(test.Context(), test.GetLogger(t))
-	ctx = newContextWithRightsFetcher(ctx)
 
 	c := component.MustNew(test.GetLogger(t), &component.Config{
 		ServiceBase: config.ServiceBase{
@@ -274,7 +340,6 @@ func TestDiscover(t *testing.T) {
 func TestVersion(t *testing.T) {
 	a := assertions.New(t)
 	ctx := log.NewContext(test.Context(), test.GetLogger(t))
-	ctx = newContextWithRightsFetcher(ctx)
 
 	c := component.MustNew(test.GetLogger(t), &component.Config{
 		ServiceBase: config.ServiceBase{
@@ -288,7 +353,7 @@ func TestVersion(t *testing.T) {
 	c.RegisterWeb(srv)
 	test.Must(nil, c.Start())
 	defer c.Close()
-	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway)
+	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway, registeredGatewayToken)
 
 	conn, _, err := websocket.DefaultDialer.Dial(testTrafficEndPoint, nil)
 	if !a.So(err, should.BeNil) {
@@ -391,7 +456,6 @@ func TestVersion(t *testing.T) {
 func TestTraffic(t *testing.T) {
 	a := assertions.New(t)
 	ctx := log.NewContext(test.Context(), test.GetLogger(t))
-	ctx = newContextWithRightsFetcher(ctx)
 
 	c := component.MustNew(test.GetLogger(t), &component.Config{
 		ServiceBase: config.ServiceBase{
@@ -406,7 +470,7 @@ func TestTraffic(t *testing.T) {
 	test.Must(nil, c.Start())
 	defer c.Close()
 
-	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway)
+	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway, registeredGatewayToken)
 
 	wsConn, _, err := websocket.DefaultDialer.Dial(testTrafficEndPoint, nil)
 	if !a.So(err, should.BeNil) {
@@ -679,6 +743,7 @@ func TestTraffic(t *testing.T) {
 							t.Fatalf("Failed to unmarshal response `%s`: %v", string(res), err)
 						}
 						msg.XTime = tc.ExpectedBSDownstream.(messages.DownlinkMessage).XTime
+						msg.MuxTime = tc.ExpectedBSDownstream.(messages.DownlinkMessage).MuxTime
 						if !a.So(msg, should.Resemble, tc.ExpectedBSDownstream.(messages.DownlinkMessage)) {
 							t.Fatalf("Incorrect Downlink received: %s", string(res))
 						}
