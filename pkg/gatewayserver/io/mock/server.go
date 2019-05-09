@@ -17,7 +17,6 @@ package mock
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -29,7 +28,6 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/ttnpb"
 	"go.thethings.network/lorawan-stack/pkg/unique"
 	"go.thethings.network/lorawan-stack/pkg/util/test"
-	"google.golang.org/grpc/metadata"
 )
 
 type server struct {
@@ -67,26 +65,10 @@ func (s *server) FillGatewayContext(ctx context.Context, ids ttnpb.GatewayIdenti
 	if ids.IsZero() {
 		return nil, ttnpb.GatewayIdentifiers{}, errors.New("the identifiers are zero")
 	}
-	if ids.GatewayID == "" {
-		ids.GatewayID = fmt.Sprintf("eui-%v", strings.ToLower(ids.EUI.String()))
+	if ids.GatewayID != "" {
 		return ctx, ids, nil
 	}
-
-	if _, ok := s.gateways[unique.ID(ctx, ids)]; !ok {
-		return nil, ttnpb.GatewayIdentifiers{}, errors.New("the gateway is not registered")
-	}
-
-	// Get the Auth token from context
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
-		authorization, ok := md["authorization"]
-		if ok && len(authorization) != 0 {
-			auth, ok := s.gatewayAuths[unique.ID(ctx, ids)]
-			if !ok || !reflect.DeepEqual(auth, authorization) {
-				return nil, ttnpb.GatewayIdentifiers{}, errors.New("the auth token is invalid")
-			}
-		}
-	}
+	ids.GatewayID = fmt.Sprintf("eui-%v", strings.ToLower(ids.EUI.String()))
 	return ctx, ids, nil
 }
 

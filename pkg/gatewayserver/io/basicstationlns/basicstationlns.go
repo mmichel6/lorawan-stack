@@ -30,7 +30,6 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/gatewayserver/io/basicstationlns/messages"
 	"go.thethings.network/lorawan-stack/pkg/log"
 	"go.thethings.network/lorawan-stack/pkg/ttnpb"
-	"go.thethings.network/lorawan-stack/pkg/unique"
 	"go.thethings.network/lorawan-stack/pkg/web"
 	"google.golang.org/grpc/metadata"
 )
@@ -62,7 +61,7 @@ func New(ctx context.Context, server io.Server) web.Registerer {
 func (s *srv) RegisterRoutes(server *web.Server) {
 	group := server.Group(ttnpb.HTTPAPIPrefix + "/gs/io/basicstation")
 	group.GET("/discover", s.handleDiscover)
-	group.GET("/traffic/:uid", s.handleTraffic)
+	group.GET("/traffic/:id", s.handleTraffic)
 }
 
 func (s *srv) handleDiscover(c echo.Context) error {
@@ -102,8 +101,6 @@ func (s *srv) handleDiscover(c echo.Context) error {
 		writeDiscoverError(ctx, ws, "Router not provisioned")
 		return err
 	}
-	uid := unique.ID(ctx, ids)
-	ctx = log.NewContextWithField(ctx, "gateway_uid", uid)
 
 	scheme := "ws"
 	if c.IsTLS() {
@@ -114,7 +111,7 @@ func (s *srv) handleDiscover(c echo.Context) error {
 		Muxs: basicstation.EUI{
 			Prefix: "muxs",
 		},
-		URI: fmt.Sprintf("%s://%s%s", scheme, c.Request().Host, c.Echo().URI(s.handleTraffic, uid)),
+		URI: fmt.Sprintf("%s://%s%s", scheme, c.Request().Host, c.Echo().URI(s.handleTraffic, ids.GatewayID)),
 	}
 	data, err = json.Marshal(res)
 	if err != nil {
@@ -131,33 +128,18 @@ func (s *srv) handleDiscover(c echo.Context) error {
 }
 
 func (s *srv) handleTraffic(c echo.Context) error {
-	uid := c.Param("uid")
-	ids, err := unique.ToGatewayID(uid)
-	if err != nil {
-		return err
-	}
-	ctx, err := unique.WithContext(s.ctx, uid)
-	if err != nil {
-		return err
-	}
-
+	id := c.Param("id")
 	auth := c.Request().Header.Get(echo.HeaderAuthorization)
+	ctx := s.ctx
 	if auth != "" {
 		md := metadata.New(map[string]string{
-			"id":            ids.GatewayID,
+			"id":            id,
 			"authorization": fmt.Sprintf("Bearer %s", auth),
 		})
-		if ctxMd, ok := metadata.FromIncomingContext(ctx); ok {
+		if ctxMd, ok := metadata.FromIncomingContext(s.ctx); ok {
 			md = metadata.Join(ctxMd, md)
 		}
-		ctx = metadata.NewIncomingContext(ctx, md)
-	} else {
-		// Unauthenticated basic station gateways are handled similar to EUI-only udp gateways.
-		ids.EUI, err = messages.GetEUIfromUID(uid)
-		if err != nil {
-			return err
-		}
-		ids.GatewayID = ""
+		ctx = metadata.NewIncomingContext(s.ctx, md)
 	}
 
 	logger := log.FromContext(ctx).WithFields(log.Fields(
@@ -165,13 +147,13 @@ func (s *srv) handleTraffic(c echo.Context) error {
 		"remote_addr", c.Request().RemoteAddr,
 	))
 
-	ctx, ids, err = s.server.FillGatewayContext(ctx, ids)
+	ctx, ids, err := s.server.FillGatewayContext(ctx, ttnpb.GatewayIdentifiers{GatewayID: id})
 	if err != nil {
 		logger.WithError(err).Debug("Failed to fill gateway context")
 		return err
 	}
-	uid = unique.ID(ctx, ids)
-	ctx = log.NewContextWithField(ctx, "gateway_uid", uid)
+
+	ctx = log.NewContextWithField(ctx, "gateway_id", ids.GatewayID)
 
 	fp, err := s.server.GetFrequencyPlan(ctx, ids)
 	if err != nil {
@@ -187,7 +169,7 @@ func (s *srv) handleTraffic(c echo.Context) error {
 
 	ctx = rights.NewContext(ctx, rights.Rights{
 		GatewayRights: map[string]*ttnpb.Rights{
-			uid: {
+			id: {
 				Rights: []ttnpb.Right{ttnpb.RIGHT_GATEWAY_LINK},
 			},
 		},
@@ -291,6 +273,7 @@ func (s *srv) handleTraffic(c echo.Context) error {
 			if err := conn.HandleUp(up); err != nil {
 				logger.WithError(err).Warn("Failed to handle uplink message")
 			}
+			recordRTT(conn, receivedAt, jreq.RefTime)
 
 		case messages.TypeUpstreamUplinkDataFrame:
 			var updf messages.UplinkDataFrame
@@ -306,6 +289,7 @@ func (s *srv) handleTraffic(c echo.Context) error {
 			if err := conn.HandleUp(up); err != nil {
 				logger.WithError(err).Warn("Failed to handle uplink message")
 			}
+			recordRTT(conn, receivedAt, updf.RefTime)
 
 		case messages.TypeUpstreamTxConfirmation:
 			var txConf messages.TxConfirmation
@@ -313,20 +297,16 @@ func (s *srv) handleTraffic(c echo.Context) error {
 				logger.WithError(err).Warn("Failed to unmarshal Tx acknowledgement frame")
 				return nil
 			}
-			var refTime time.Time
-			sec, nsec := math.Modf(txConf.RefTime)
-			if sec != 0 {
-				refTime = time.Unix(int64(sec), int64(nsec*(1e9)))
-			}
-			if correlationIDs, timeDiff, ok := s.tokens.Get(uint16(txConf.Diid), refTime); ok {
-				conn.RecordRTT(timeDiff)
-				txAck := messages.ToTxAcknowledgment(correlationIDs)
+			if cids, _, ok := s.tokens.Get(uint16(txConf.Diid), receivedAt); ok {
+				txAck := messages.ToTxAcknowledgment(cids)
 				if err := conn.HandleTxAck(&txAck); err != nil {
 					logger.Warn("Failed to handle Tx acknowledgement message")
 				}
 			} else {
 				logger.Warn("TxAck either does not correspond to a downlink message or arrived too late")
 			}
+			recordRTT(conn, receivedAt, txConf.RefTime)
+			
 		case messages.TypeUpstreamProprietaryDataFrame:
 			return errMessageTypeNotImplemented.WithAttributes("type", typ)
 		case messages.TypeUpstreamRemoteShell:
@@ -351,5 +331,13 @@ func writeDiscoverError(ctx context.Context, ws *websocket.Conn, msg string) {
 	}
 	if err := ws.WriteMessage(websocket.TextMessage, errMsg); err != nil {
 		logger.WithError(err).Debug("Failed to write error response message")
+	}
+}
+
+func recordRTT(conn *io.Connection, receivedAt time.Time, refTime float64) {
+	sec, nsec := math.Modf(refTime)
+	if sec != 0 {
+		ref := time.Unix(int64(sec), int64(nsec*1e9))
+		conn.RecordRTT(receivedAt.Sub(ref))
 	}
 }
