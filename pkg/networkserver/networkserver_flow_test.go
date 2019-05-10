@@ -58,6 +58,119 @@ func newJSPeer(ctx context.Context, js interface {
 	return test.Must(test.NewGRPCServerPeer(ctx, js, ttnpb.RegisterNsJsServer)).(cluster.Peer)
 }
 
+func assertLinkApplication(t *testing.T, ctx context.Context, conn *grpc.ClientConn, getPeerCh <-chan test.GetPeerRequest, timeout time.Duration, appID string) (ttnpb.AsNs_LinkApplicationClient, bool) {
+	t.Helper()
+
+	a := assertions.New(t)
+
+	listRightsCh := make(chan test.ApplicationAccessListRightsRequest)
+	defer func() {
+		close(listRightsCh)
+	}()
+
+	var link ttnpb.AsNs_LinkApplicationClient
+	var err error
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		link, err = ttnpb.NewAsNsClient(conn).LinkApplication(
+			(rpcmetadata.MD{
+				ID: appID,
+			}).ToOutgoingContext(ctx),
+			grpc.PerRPCCredentials(rpcmetadata.MD{
+				AuthType:      "Bearer",
+				AuthValue:     "link-application-key",
+				AllowInsecure: true,
+			}),
+		)
+		wg.Done()
+	}()
+
+	if !a.So(test.AssertGetPeerRequest(t, getPeerCh, Timeout,
+		func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) bool {
+			return a.So(role, should.Equal, ttnpb.PeerInfo_ACCESS) && a.So(ids, should.BeNil)
+		},
+		newISPeer(ctx, &test.MockApplicationAccessServer{
+			ListRightsFunc: test.MakeApplicationAccessListRightsChFunc(listRightsCh),
+		}),
+	), should.BeTrue) {
+		return nil, false
+	}
+
+	if !a.So(test.AssertListRightsRequest(t, listRightsCh, Timeout,
+		func(ctx context.Context, ids ttnpb.Identifiers) bool {
+			md := rpcmetadata.FromIncomingContext(ctx)
+			return a.So(md.AuthType, should.Equal, "Bearer") &&
+				a.So(md.AuthValue, should.Equal, "link-application-key") &&
+				a.So(ids, should.Resemble, &ttnpb.ApplicationIdentifiers{ApplicationID: appID})
+		}, ttnpb.RIGHT_APPLICATION_LINK,
+	), should.BeTrue) {
+		return nil, false
+	}
+
+	if !a.So(test.WaitTimeout(Timeout, wg.Wait), should.BeTrue) {
+		t.Error("Timed out while waiting for AS link to open")
+		return nil, false
+	}
+	return link, a.So(err, should.BeNil)
+}
+
+func assertSetDevice(t *testing.T, ctx context.Context, conn *grpc.ClientConn, getPeerCh <-chan test.GetPeerRequest, timeout time.Duration, appID string, req *ttnpb.SetEndDeviceRequest) (*ttnpb.EndDevice, bool) {
+	t.Helper()
+
+	a := assertions.New(t)
+
+	listRightsCh := make(chan test.ApplicationAccessListRightsRequest)
+	defer func() {
+		close(listRightsCh)
+	}()
+
+	var dev *ttnpb.EndDevice
+	var err error
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		dev, err = ttnpb.NewNsEndDeviceRegistryClient(conn).Set(
+			ctx,
+			req,
+			grpc.PerRPCCredentials(rpcmetadata.MD{
+				AuthType:      "Bearer",
+				AuthValue:     "set-key",
+				AllowInsecure: true,
+			}),
+		)
+		wg.Done()
+	}()
+
+	if !a.So(test.AssertGetPeerRequest(t, getPeerCh, Timeout,
+		func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) bool {
+			return a.So(role, should.Equal, ttnpb.PeerInfo_ACCESS) && a.So(ids, should.BeNil)
+		},
+		newISPeer(ctx, &test.MockApplicationAccessServer{
+			ListRightsFunc: test.MakeApplicationAccessListRightsChFunc(listRightsCh),
+		}),
+	), should.BeTrue) {
+		return nil, false
+	}
+
+	if !a.So(test.AssertListRightsRequest(t, listRightsCh, Timeout,
+		func(ctx context.Context, ids ttnpb.Identifiers) bool {
+			md := rpcmetadata.FromIncomingContext(ctx)
+			return a.So(md.AuthType, should.Equal, "Bearer") &&
+				a.So(md.AuthValue, should.Equal, "set-key") &&
+				a.So(ids, should.Resemble, &ttnpb.ApplicationIdentifiers{ApplicationID: appID})
+		}, ttnpb.RIGHT_APPLICATION_DEVICES_WRITE,
+	), should.BeTrue) {
+		return nil, false
+	}
+
+	if !a.So(test.WaitTimeout(Timeout, wg.Wait), should.BeTrue) {
+		t.Error("Timed out while waiting for device to be created")
+		return nil, false
+	}
+	return dev, a.So(err, should.BeNil)
+}
+
 func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTaskQueue) {
 	a := assertions.New(t)
 
@@ -117,11 +230,6 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 	test.Must(nil, ns.Start())
 	defer ns.Close()
 
-	listRightsCh := make(chan test.ApplicationAccessListRightsRequest)
-	isPeer := newISPeer(test.Context(), &test.MockApplicationAccessServer{
-		ListRightsFunc: test.MakeApplicationAccessListRightsChFunc(listRightsCh),
-	})
-
 	scheduleDownlinkCh := make(chan ScheduleDownlinkRequest)
 	gsPeer := newGSPeer(test.Context(), &MockNsGsServer{
 		ScheduleDownlinkFunc: MakeScheduleDownlinkChFunc(scheduleDownlinkCh),
@@ -133,112 +241,39 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 	})
 
 	conn := ns.LoopbackConn()
-	nsReg := ttnpb.NewNsEndDeviceRegistryClient(conn)
-	asns := ttnpb.NewAsNsClient(conn)
 	gsns := ttnpb.NewGsNsClient(conn)
 
 	start := time.Now()
 	ctx := test.Context()
 
-	var link ttnpb.AsNs_LinkApplicationClient
-	var err error
-	linkWg := &sync.WaitGroup{}
-	linkWg.Add(1)
-	go func() {
-		link, err = asns.LinkApplication((rpcmetadata.MD{
-			ID: "test-app-id",
-		}).ToOutgoingContext(ctx),
-			grpc.PerRPCCredentials(rpcmetadata.MD{
-				AuthType:      "Bearer",
-				AuthValue:     "link-application-key",
-				AllowInsecure: true,
-			}),
-		)
-		linkWg.Done()
-	}()
-
-	a.So(test.AssertGetPeerRequest(t, getPeerCh, Timeout,
-		func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) bool {
-			return a.So(role, should.Equal, ttnpb.PeerInfo_ACCESS) && a.So(ids, should.BeNil)
-		},
-		isPeer,
-	), should.BeTrue)
-
-	a.So(test.AssertListRightsRequest(t, listRightsCh, Timeout,
-		func(ctx context.Context, ids ttnpb.Identifiers) bool {
-			md := rpcmetadata.FromIncomingContext(ctx)
-			return a.So(md.AuthType, should.Equal, "Bearer") &&
-				a.So(md.AuthValue, should.Equal, "link-application-key") &&
-				a.So(ids, should.Resemble, &ttnpb.ApplicationIdentifiers{ApplicationID: "test-app-id"})
-		}, ttnpb.RIGHT_APPLICATION_LINK,
-	), should.BeTrue)
-
-	if !a.So(test.WaitTimeout(Timeout, linkWg.Wait), should.BeTrue) {
-		t.Fatal("Timed out while waiting for AS link to open")
-	}
-	if !a.So(err, should.BeNil) || !a.So(link, should.NotBeNil) {
+	link, ok := assertLinkApplication(t, ctx, conn, getPeerCh, Timeout, "test-app-id")
+	if !a.So(ok, should.BeTrue) || !a.So(link, should.NotBeNil) {
 		t.Fatal("Failed to link application")
 	}
 
-	var dev *ttnpb.EndDevice
-	setWg := &sync.WaitGroup{}
-	setWg.Add(1)
-	go func() {
-		dev, err = nsReg.Set(
-			ctx,
-			&ttnpb.SetEndDeviceRequest{
-				EndDevice: ttnpb.EndDevice{
-					EndDeviceIdentifiers: ttnpb.EndDeviceIdentifiers{
-						DeviceID:               "test-dev-id",
-						ApplicationIdentifiers: ttnpb.ApplicationIdentifiers{ApplicationID: "test-app-id"},
-						JoinEUI:                &types.EUI64{0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-						DevEUI:                 &types.EUI64{0x42, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-					},
-					FrequencyPlanID:   test.EUFrequencyPlanID,
-					LoRaWANPHYVersion: ttnpb.PHY_V1_0,
-					LoRaWANVersion:    ttnpb.MAC_V1_0,
-					SupportsJoin:      true,
-				},
-				FieldMask: pbtypes.FieldMask{
-					Paths: []string{
-						"frequency_plan_id",
-						"lorawan_phy_version",
-						"lorawan_version",
-						"supports_join",
-					},
-				},
+	dev, ok := assertSetDevice(t, ctx, conn, getPeerCh, Timeout, "test-app-id", &ttnpb.SetEndDeviceRequest{
+		EndDevice: ttnpb.EndDevice{
+			EndDeviceIdentifiers: ttnpb.EndDeviceIdentifiers{
+				DeviceID:               "test-dev-id",
+				ApplicationIdentifiers: ttnpb.ApplicationIdentifiers{ApplicationID: "test-app-id"},
+				JoinEUI:                &types.EUI64{0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+				DevEUI:                 &types.EUI64{0x42, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 			},
-			grpc.PerRPCCredentials(rpcmetadata.MD{
-				AuthType:      "Bearer",
-				AuthValue:     "set-key",
-				AllowInsecure: true,
-			}),
-		)
-		setWg.Done()
-	}()
-
-	a.So(test.AssertGetPeerRequest(t, getPeerCh, Timeout,
-		func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) bool {
-			return a.So(role, should.Equal, ttnpb.PeerInfo_ACCESS) && a.So(ids, should.BeNil)
+			FrequencyPlanID:   test.EUFrequencyPlanID,
+			LoRaWANPHYVersion: ttnpb.PHY_V1_0,
+			LoRaWANVersion:    ttnpb.MAC_V1_0,
+			SupportsJoin:      true,
 		},
-		isPeer,
-	), should.BeTrue)
-
-	a.So(test.AssertListRightsRequest(t, listRightsCh, Timeout,
-		func(ctx context.Context, ids ttnpb.Identifiers) bool {
-			md := rpcmetadata.FromIncomingContext(ctx)
-			return a.So(md.AuthType, should.Equal, "Bearer") &&
-				a.So(md.AuthValue, should.Equal, "set-key") &&
-				a.So(ids, should.Resemble, &ttnpb.ApplicationIdentifiers{ApplicationID: "test-app-id"})
+		FieldMask: pbtypes.FieldMask{
+			Paths: []string{
+				"frequency_plan_id",
+				"lorawan_phy_version",
+				"lorawan_version",
+				"supports_join",
+			},
 		},
-		ttnpb.RIGHT_APPLICATION_DEVICES_WRITE,
-	), should.BeTrue)
-
-	if !a.So(test.WaitTimeout(Timeout, setWg.Wait), should.BeTrue) {
-		t.Fatal("Timed out while waiting for device to be created")
-	}
-
-	if !a.So(err, should.BeNil) || !a.So(dev, should.NotBeNil) {
+	})
+	if !a.So(ok, should.BeTrue) || !a.So(dev, should.NotBeNil) {
 		t.Fatal("Failed to create device")
 	}
 	a.So(dev.CreatedAt, should.HappenAfter, start)
@@ -378,6 +413,7 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 		}
 
 		var asUp *ttnpb.ApplicationUp
+		var err error
 		if !a.So(test.WaitTimeout(Timeout, func() {
 			asUp, err = link.Recv()
 		}), should.BeTrue) {
@@ -552,6 +588,7 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 		}
 
 		var asUp *ttnpb.ApplicationUp
+		var err error
 		if !a.So(test.WaitTimeout(Timeout, func() {
 			asUp, err = link.Recv()
 		}), should.BeTrue) {
