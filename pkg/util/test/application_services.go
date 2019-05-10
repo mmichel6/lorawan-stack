@@ -18,6 +18,7 @@ import (
 	"context"
 
 	pbtypes "github.com/gogo/protobuf/types"
+	"go.thethings.network/lorawan-stack/pkg/cluster"
 	"go.thethings.network/lorawan-stack/pkg/ttnpb"
 )
 
@@ -86,4 +87,47 @@ func (m MockApplicationAccessServer) ListCollaborators(ctx context.Context, req 
 		return &ttnpb.Collaborators{}, nil
 	}
 	return m.ListCollaboratorsFunc(ctx, req)
+}
+
+type ApplicationAccessListRightsResponse struct {
+	Response *ttnpb.Rights
+	Error    error
+}
+type ApplicationAccessListRightsRequest struct {
+	Context  context.Context
+	Message  *ttnpb.ApplicationIdentifiers
+	Response chan<- ApplicationAccessListRightsResponse
+}
+
+func MakeApplicationAccessListRightsChFunc(reqCh chan<- ApplicationAccessListRightsRequest) func(context.Context, *ttnpb.ApplicationIdentifiers) (*ttnpb.Rights, error) {
+	return func(ctx context.Context, msg *ttnpb.ApplicationIdentifiers) (*ttnpb.Rights, error) {
+		respCh := make(chan ApplicationAccessListRightsResponse)
+		reqCh <- ApplicationAccessListRightsRequest{
+			Context:  ctx,
+			Message:  msg,
+			Response: respCh,
+		}
+		resp := <-respCh
+		return resp.Response, resp.Error
+	}
+}
+
+type GetPeerRequest struct {
+	Context     context.Context
+	Role        ttnpb.PeerInfo_Role
+	Identifiers ttnpb.Identifiers
+	Response    chan<- cluster.Peer
+}
+
+func MakeGetPeerChFunc(reqCh chan<- GetPeerRequest) func(context.Context, ttnpb.PeerInfo_Role, ttnpb.Identifiers) cluster.Peer {
+	return func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) cluster.Peer {
+		respCh := make(chan cluster.Peer)
+		reqCh <- GetPeerRequest{
+			Context:     ctx,
+			Role:        role,
+			Identifiers: ids,
+			Response:    respCh,
+		}
+		return <-respCh
+	}
 }
