@@ -24,6 +24,7 @@ import (
 // MockApplicationAccessServer is a mock ttnpb.ApplicationAccessServer used for testing.
 type MockApplicationAccessServer struct {
 	CreateAPIKeyFunc      func(context.Context, *ttnpb.CreateApplicationAPIKeyRequest) (*ttnpb.APIKey, error)
+	GetAPIKeyFunc         func(context.Context, *ttnpb.GetApplicationAPIKeyRequest) (*ttnpb.APIKey, error)
 	ListAPIKeysFunc       func(context.Context, *ttnpb.ListApplicationAPIKeysRequest) (*ttnpb.APIKeys, error)
 	ListCollaboratorsFunc func(context.Context, *ttnpb.ListApplicationCollaboratorsRequest) (*ttnpb.Collaborators, error)
 	ListRightsFunc        func(context.Context, *ttnpb.ApplicationIdentifiers) (*ttnpb.Rights, error)
@@ -53,6 +54,14 @@ func (m MockApplicationAccessServer) ListAPIKeys(ctx context.Context, req *ttnpb
 		return &ttnpb.APIKeys{}, nil
 	}
 	return m.ListAPIKeysFunc(ctx, req)
+}
+
+// GetAPIKey calls GetAPIKeyFunc if set and returns zero value otherwise.
+func (m MockApplicationAccessServer) GetAPIKey(ctx context.Context, req *ttnpb.GetApplicationAPIKeyRequest) (*ttnpb.APIKey, error) {
+	if m.GetAPIKeyFunc == nil {
+		return &ttnpb.APIKey{}, nil
+	}
+	return m.GetAPIKeyFunc(ctx, req)
 }
 
 // UpdateAPIKey calls UpdateAPIKeyFunc if set and returns zero value otherwise.
