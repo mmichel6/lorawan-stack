@@ -16,9 +16,10 @@ package test
 
 import (
 	"context"
+	"testing"
+	"time"
 
 	pbtypes "github.com/gogo/protobuf/types"
-	"go.thethings.network/lorawan-stack/pkg/cluster"
 	"go.thethings.network/lorawan-stack/pkg/ttnpb"
 )
 
@@ -112,22 +113,28 @@ func MakeApplicationAccessListRightsChFunc(reqCh chan<- ApplicationAccessListRig
 	}
 }
 
-type GetPeerRequest struct {
-	Context     context.Context
-	Role        ttnpb.PeerInfo_Role
-	Identifiers ttnpb.Identifiers
-	Response    chan<- cluster.Peer
-}
-
-func MakeGetPeerChFunc(reqCh chan<- GetPeerRequest) func(context.Context, ttnpb.PeerInfo_Role, ttnpb.Identifiers) cluster.Peer {
-	return func(ctx context.Context, role ttnpb.PeerInfo_Role, ids ttnpb.Identifiers) cluster.Peer {
-		respCh := make(chan cluster.Peer)
-		reqCh <- GetPeerRequest{
-			Context:     ctx,
-			Role:        role,
-			Identifiers: ids,
-			Response:    respCh,
+func AssertListRightsRequest(t *testing.T, reqCh <-chan ApplicationAccessListRightsRequest, timeout time.Duration, assert func(ctx context.Context, ids ttnpb.Identifiers) bool, rights ...ttnpb.Right) bool {
+	t.Helper()
+	select {
+	case req := <-reqCh:
+		if !assert(req.Context, req.Message) {
+			return false
 		}
-		return <-respCh
+		select {
+		case req.Response <- ApplicationAccessListRightsResponse{
+			Response: &ttnpb.Rights{
+				Rights: rights,
+			},
+		}:
+			return true
+
+		case <-time.After(timeout):
+			t.Error("Timed out while waiting for ApplicationAccess.ListRights response to be processed")
+			return false
+		}
+
+	case <-time.After(timeout):
+		t.Error("Timed out while waiting for ApplicationAccess.ListRights request to arrive")
+		return false
 	}
 }
