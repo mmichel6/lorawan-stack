@@ -230,18 +230,7 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 	test.Must(nil, ns.Start())
 	defer ns.Close()
 
-	scheduleDownlinkCh := make(chan ScheduleDownlinkRequest)
-	gsPeer := newGSPeer(test.Context(), &MockNsGsServer{
-		ScheduleDownlinkFunc: MakeScheduleDownlinkChFunc(scheduleDownlinkCh),
-	})
-
-	handleJoinCh := make(chan HandleJoinRequest)
-	jsPeer := newJSPeer(test.Context(), &MockNsJsServer{
-		HandleJoinFunc: MakeHandleJoinChFunc(handleJoinCh),
-	})
-
 	conn := ns.LoopbackConn()
-	gsns := ttnpb.NewGsNsClient(conn)
 
 	start := time.Now()
 	ctx := test.Context()
@@ -293,6 +282,17 @@ func handleOTAAClassA868FlowTest(t *testing.T, reg DeviceRegistry, tq DownlinkTa
 		CreatedAt:         dev.CreatedAt,
 		UpdatedAt:         dev.UpdatedAt,
 	})
+
+	scheduleDownlinkCh := make(chan ScheduleDownlinkRequest)
+	gsPeer := newGSPeer(test.Context(), &MockNsGsServer{
+		ScheduleDownlinkFunc: MakeScheduleDownlinkChFunc(scheduleDownlinkCh),
+	})
+
+	handleJoinCh := make(chan HandleJoinRequest)
+	jsPeer := newJSPeer(test.Context(), &MockNsJsServer{
+		HandleJoinFunc: MakeHandleJoinChFunc(handleJoinCh),
+	})
+	gsns := ttnpb.NewGsNsClient(conn)
 
 	appSKey := types.AES128Key{0x42, 0x42, 0x42, 0x42, 0x42, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	fNwkSIntKey := types.AES128Key{0x42, 0x42, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
