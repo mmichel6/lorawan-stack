@@ -28,6 +28,7 @@ import (
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io"
 	iogrpc "go.thethings.network/lorawan-stack/pkg/applicationserver/io/grpc"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/mqtt"
+	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/nats"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/pubsub"
 	"go.thethings.network/lorawan-stack/pkg/applicationserver/io/web"
 	"go.thethings.network/lorawan-stack/pkg/auth/rights"
@@ -167,6 +168,14 @@ func New(c *component.Component, conf *Config) (as *ApplicationServer, err error
 		as.webhooks = webhooks
 		as.defaultSubscribers = append(as.defaultSubscribers, webhooks.NewSubscription())
 		c.RegisterWeb(webhooks)
+	}
+
+	if conf.NATS.Server != "" {
+		if nats, err := nats.Start(ctx, as, pubsub.JSON, conf.NATS.Server); err != nil {
+			return nil, err
+		} else if nats != nil {
+			as.defaultSubscribers = append(as.defaultSubscribers, nats)
+		}
 	}
 
 	c.RegisterGRPC(as)

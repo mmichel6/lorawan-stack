@@ -42,6 +42,7 @@ type Config struct {
 	Links    LinkRegistry   `name:"-"`
 	MQTT     MQTTConfig     `name:"mqtt" description:"MQTT configuration"`
 	Webhooks WebhooksConfig `name:"webhooks" description:"Webhooks configuration"`
+	NATS     NATSConfig     `name:"nats" description:"NATS configuration"`
 }
 
 var errLinkMode = errors.DefineInvalidArgument("link_mode", "invalid link mode `{value}`")
@@ -76,6 +77,11 @@ type WebhooksConfig struct {
 	Timeout   time.Duration       `name:"timeout" description:"Wait timeout of the target to process the request"`
 	QueueSize int                 `name:"queue-size" description:"Number of requests to queue"`
 	Workers   int                 `name:"workers" description:"Number of workers to process requests"`
+}
+
+// NATSConfig contains NATS configuration of the Application Server.
+type NATSConfig struct {
+	Server string `name:"server" description:"Address for the NATS frontend to connect to"`
 }
 
 // NewWebhooks returns a new web.Webhooks based on the configuration.
