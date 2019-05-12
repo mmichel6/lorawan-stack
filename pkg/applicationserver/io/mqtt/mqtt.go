@@ -303,10 +303,10 @@ func (c *connection) deliver(pkt *packet.PublishPacket) {
 	var op func(io.Server, context.Context, ttnpb.EndDeviceIdentifiers, []*ttnpb.ApplicationDownlink) error
 	switch {
 	case c.format.IsDownlinkPushTopic(pkt.TopicParts):
-		deviceID = c.format.ParseDownlinkPushTopic(pkt.TopicParts)
+		_, deviceID = c.format.ParseDownlinkPushTopic(pkt.TopicParts)
 		op = io.Server.DownlinkQueuePush
 	case c.format.IsDownlinkReplaceTopic(pkt.TopicParts):
-		deviceID = c.format.ParseDownlinkReplaceTopic(pkt.TopicParts)
+		_, deviceID = c.format.ParseDownlinkReplaceTopic(pkt.TopicParts)
 		op = io.Server.DownlinkQueueReplace
 	default:
 		logger.Error("Invalid topic path")

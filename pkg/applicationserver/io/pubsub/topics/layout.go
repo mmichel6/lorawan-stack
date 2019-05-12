@@ -29,8 +29,8 @@ type Layout interface {
 
 	DownlinkPushTopic(applicationUID, deviceID string) []string
 	IsDownlinkPushTopic(parts []string) bool
-	ParseDownlinkPushTopic(parts []string) (deviceID string)
+	ParseDownlinkPushTopic(parts []string) (applicationUID, deviceID string)
 	DownlinkReplaceTopic(applicationUID, deviceID string) []string
 	IsDownlinkReplaceTopic(parts []string) bool
-	ParseDownlinkReplaceTopic(parts []string) (deviceID string)
+	ParseDownlinkReplaceTopic(parts []string) (applicationUID, deviceID string)
 }

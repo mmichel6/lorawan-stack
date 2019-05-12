@@ -75,8 +75,8 @@ func (V3) IsDownlinkPushTopic(parts []string) bool {
 }
 
 // ParseDownlinkPushTopic implements the topics.Layout interface.
-func (V3) ParseDownlinkPushTopic(parts []string) (deviceID string) {
-	return parts[3]
+func (V3) ParseDownlinkPushTopic(parts []string) (applicationUID, deviceID string) {
+	return parts[1], parts[3]
 }
 
 // DownlinkReplaceTopic implements the topics.Layout interface.
@@ -90,8 +90,8 @@ func (V3) IsDownlinkReplaceTopic(parts []string) bool {
 }
 
 // ParseDownlinkReplaceTopic implements the topics.Layout interface.
-func (V3) ParseDownlinkReplaceTopic(parts []string) (deviceID string) {
-	return parts[3]
+func (V3) ParseDownlinkReplaceTopic(parts []string) (applicationUID, deviceID string) {
+	return parts[1], parts[3]
 }
 
 // Default is the default topic layout.
