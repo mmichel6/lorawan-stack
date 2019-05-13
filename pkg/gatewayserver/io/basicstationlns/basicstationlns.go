@@ -153,6 +153,21 @@ func (s *srv) handleTraffic(c echo.Context) error {
 		return err
 	}
 
+	if auth != "" {
+		if err = rights.RequireGateway(ctx, ids, ttnpb.RIGHT_GATEWAY_LINK); err != nil {
+			logger.WithError(err).Debug("Failed to authorize gateway")
+			return err
+		}
+	} else {
+		ctx = rights.NewContext(ctx, rights.Rights{
+			GatewayRights: map[string]*ttnpb.Rights{
+				id: {
+					Rights: []ttnpb.Right{ttnpb.RIGHT_GATEWAY_LINK},
+				},
+			},
+		})
+	}
+
 	ctx = log.NewContextWithField(ctx, "gateway_id", ids.GatewayID)
 
 	fp, err := s.server.GetFrequencyPlan(ctx, ids)
@@ -166,14 +181,6 @@ func (s *srv) handleTraffic(c echo.Context) error {
 		return err
 	}
 	defer ws.Close()
-
-	ctx = rights.NewContext(ctx, rights.Rights{
-		GatewayRights: map[string]*ttnpb.Rights{
-			id: {
-				Rights: []ttnpb.Right{ttnpb.RIGHT_GATEWAY_LINK},
-			},
-		},
-	})
 
 	conn, err := s.server.Connect(ctx, s, ids)
 	if err != nil {
@@ -306,7 +313,7 @@ func (s *srv) handleTraffic(c echo.Context) error {
 				logger.Warn("TxAck either does not correspond to a downlink message or arrived too late")
 			}
 			recordRTT(conn, receivedAt, txConf.RefTime)
-			
+
 		case messages.TypeUpstreamProprietaryDataFrame:
 			return errMessageTypeNotImplemented.WithAttributes("type", typ)
 		case messages.TypeUpstreamRemoteShell:

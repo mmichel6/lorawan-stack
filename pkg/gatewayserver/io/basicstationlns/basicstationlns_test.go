@@ -53,6 +53,82 @@ var (
 )
 
 func eui64Ptr(eui types.EUI64) *types.EUI64 { return &eui }
+
+func TestClientTokenAuth(t *testing.T) {
+	ctx := log.NewContext(test.Context(), test.GetLogger(t))
+	ctx = newContextWithRightsFetcher(ctx)
+	c := component.MustNew(test.GetLogger(t), &component.Config{
+		ServiceBase: config.ServiceBase{
+			HTTP: config.HTTP{
+				Listen: ":8100",
+			},
+		},
+	})
+	gs := mock.NewServer()
+	srv := New(ctx, gs)
+	c.RegisterWeb(srv)
+	test.Must(nil, c.Start())
+	defer c.Close()
+
+	gs.RegisterGateway(ctx, registeredGatewayID, &registeredGateway, registeredGatewayToken)
+
+	for _, tc := range []struct {
+		Name           string
+		GatewayID      string
+		AuthToken      string
+		ErrorAssertion func(err error) bool
+	}{
+		{
+			Name:           "RegisteredGatewayAndValidKey",
+			GatewayID:      registeredGatewayID.GatewayID,
+			AuthToken:      registeredGatewayToken,
+			ErrorAssertion: nil,
+		},
+		{
+			Name:      "RegisteredGatewayAndInValidKey",
+			GatewayID: registeredGatewayID.GatewayID,
+			AuthToken: "invalidToken",
+			ErrorAssertion: func(err error) bool {
+				return err == websocket.ErrBadHandshake
+			},
+		},
+		{
+			Name:           "RegisteredGatewayAndNoKey",
+			GatewayID:      registeredGatewayID.GatewayID,
+			ErrorAssertion: nil,
+		},
+		{
+			Name:      "UnregisteredGateway",
+			GatewayID: "eui-1122334455667788",
+			AuthToken: registeredGatewayToken,
+			ErrorAssertion: func(err error) bool {
+				return err == websocket.ErrBadHandshake
+			},
+		},
+	} {
+		t.Run(fmt.Sprintf("%s", tc.Name), func(t *testing.T) {
+			a := assertions.New(t)
+			h := http.Header{}
+			h.Set("Authorization", tc.AuthToken)
+			conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8100/api/v3/gs/io/basicstation/traffic/"+tc.GatewayID, h)
+			if err != nil {
+				if tc.ErrorAssertion == nil || !a.So(tc.ErrorAssertion(err), should.BeTrue) {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+			} else if tc.ErrorAssertion != nil {
+				t.Fatalf("Expected error")
+			}
+			if conn != nil {
+				conn.Close()
+			}
+		})
+	}
+
+}
+
+func TestClientSideTLS(t *testing.T) {
+	// TODO: https://github.com/TheThingsNetwork/lorawan-stack/issues/558
+}
 func TestDiscover(t *testing.T) {
 	ctx := log.NewContext(test.Context(), test.GetLogger(t))
 
